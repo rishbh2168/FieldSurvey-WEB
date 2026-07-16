@@ -625,23 +625,57 @@ tr:hover { background: #f8faff; }
 
     <!-- ═══ BOQ TAB ═══ -->
     <div class="section" id="sec-boq">
-      <div class="stats-row" id="boqStats"></div>
-
-      <!-- BOQ Tasks with items -->
-      <div class="table-card">
-        <div class="table-header">
-          <span class="table-title">BOQ Tasks — Material Tracking</span>
-        </div>
-        <div id="boqTasksList"></div>
+      <!-- Task Selector -->
+      <div style="background:#fff;border-radius:12px;padding:16px;margin-bottom:16px;box-shadow:var(--shadow);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span style="font-size:14px;font-weight:700;color:var(--text);white-space:nowrap">📦 Select BOQ Task:</span>
+        <select class="form-select" id="boqTaskFilter" onchange="applyBOQFilter()" style="flex:1;min-width:250px;margin-bottom:0">
+          <option value="all">📊 All BOQ Tasks (Combined View)</option>
+        </select>
+        <button class="action-btn view" onclick="exportBOQExcel()" style="padding:6px 14px">📥 Export Excel</button>
+        <span style="font-size:12px;color:var(--text-muted);white-space:nowrap" id="boqFilterInfo"></span>
       </div>
 
-      <!-- BOQ Items Excel-like sheet -->
-      <div class="table-card" style="margin-top:16px;overflow-x:auto">
+      <!-- AI Summary -->
+      <div id="boqAISummary" style="background:linear-gradient(135deg,#ede9fe,#e8f0fe);border-radius:12px;padding:16px;margin-bottom:16px;display:none">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span style="font-size:16px">🤖</span>
+          <span style="font-size:13px;font-weight:800;color:var(--purple)">AI Status Summary</span>
+          <button onclick="generateAISummary()" style="margin-left:auto;background:var(--purple);color:#fff;border:none;padding:4px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">🔄 Refresh</button>
+        </div>
+        <div id="boqAISummaryText" style="font-size:13px;color:var(--text);line-height:1.6"></div>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats-row" id="boqStats"></div>
+
+      <!-- Charts Row -->
+      <div class="stats-row" style="margin-bottom:16px">
+        <div class="table-card" style="flex:1;padding:20px;text-align:center">
+          <div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:12px">Overall Progress</div>
+          <canvas id="boqProgressRing" width="160" height="160" style="margin:0 auto;display:block"></canvas>
+          <div id="boqProgressLabel" style="font-size:12px;color:var(--text-secondary);margin-top:8px"></div>
+        </div>
+        <div class="table-card" style="flex:2;padding:20px">
+          <div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:12px">Bid vs Delivered vs Installed (₹)</div>
+          <canvas id="boqBarChart" width="400" height="160" style="width:100%;height:160px"></canvas>
+        </div>
+        <div class="table-card" style="flex:1;padding:20px;text-align:center">
+          <div style="font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:12px">Delivery Status</div>
+          <canvas id="boqPieChart" width="160" height="160" style="margin:0 auto;display:block"></canvas>
+          <div id="boqPieLabel" style="font-size:11px;color:var(--text-secondary);margin-top:8px"></div>
+        </div>
+      </div>
+
+      <!-- Progress card for selected task -->
+      <div id="boqTaskProgress" style="margin-bottom:16px"></div>
+
+      <!-- BOQ Items Sheet -->
+      <div class="table-card" style="overflow-x:auto">
         <div class="table-header">
-          <span class="table-title">📊 BOQ Items — All Tasks (Sheet View)</span>
+          <span class="table-title" id="boqSheetTitle">📊 BOQ Items — Sheet View</span>
           <span style="font-size:11px;color:var(--text-muted)" id="boqItemCountLabel">0 items</span>
         </div>
-        <table style="min-width:1200px">
+        <table style="min-width:1400px">
           <thead>
             <tr>
               <th style="min-width:40px">Sl</th>
@@ -659,8 +693,7 @@ tr:hover { background: #f8faff; }
               <th style="min-width:110px">Installed Amt</th>
               <th style="min-width:70px">Balance to Install</th>
               <th style="min-width:100px">Condition</th>
-              <th style="min-width:80px">Task</th>
-              <th style="min-width:80px">Engineer</th>
+              <th style="min-width:120px">Last Updated</th>
             </tr>
           </thead>
           <tbody id="boqItemsSheet"></tbody>
@@ -1499,22 +1532,46 @@ window.viewBOQDetail = function(idx) {
 let allBOQItems = [];
 
 async function renderBOQ() {
-  // Get tasks with hasBOQ from the regular tasks collection
   const boqTasks = allTasks.filter(t => t.hasBOQ);
-  const boqTaskCount = boqTasks.length;
-  document.getElementById('boqCount').textContent = boqTaskCount;
+  document.getElementById('boqCount').textContent = boqTasks.length;
 
   // Load all BOQ items from Firestore
   try {
     const itemsSnap = await getDocs(collection(db, 'boq_items'));
     allBOQItems = itemsSnap.docs.map(d => ({ ...d.data(), firestoreId: d.id }));
-  } catch (e) {
-    console.error('Load BOQ items failed:', e);
+  } catch (e) { console.error('Load BOQ items failed:', e); }
+
+  // Update dropdown — save current selection BEFORE rebuilding
+  const filterEl = document.getElementById('boqTaskFilter');
+  const savedSelection = filterEl.value;
+
+  filterEl.innerHTML = '<option value="all">📊 All BOQ Tasks (Combined View)</option>' +
+    boqTasks.map(t => `<option value="${t.id}">${t.id} — ${t.taskName || 'Task'} (${t.assignedTo})</option>`).join('');
+
+  // Restore saved selection if it still exists
+  if (savedSelection && savedSelection !== 'all') {
+    const optionExists = Array.from(filterEl.options).some(o => o.value === savedSelection);
+    if (optionExists) filterEl.value = savedSelection;
   }
 
-  // Calculate totals
+  // Now render with current filter
+  applyBOQFilter();
+}
+
+// This function ONLY filters and renders — no data loading, no dropdown rebuild
+window.applyBOQFilter = function() {
+  const boqTasks = allTasks.filter(t => t.hasBOQ);
+  const filterEl = document.getElementById('boqTaskFilter');
+  const selectedTaskId = filterEl.value;
+  const isAll = selectedTaskId === 'all';
+
+  // Filter items by selected task
+  const filteredItems = isAll ? allBOQItems : allBOQItems.filter(i => i.linkedTaskId === selectedTaskId);
+  const filteredTasks = isAll ? boqTasks : boqTasks.filter(t => t.id === selectedTaskId);
+
+  // Calculate totals for FILTERED items only
   let totalBid = 0, totalDelivered = 0, totalInstalled = 0;
-  allBOQItems.forEach(item => {
+  filteredItems.forEach(item => {
     totalBid += (item.unitRate || 0) * (item.bidQty || 0);
     totalDelivered += (item.unitRate || 0) * (item.deliveredQty || 0);
     totalInstalled += (item.unitRate || 0) * (item.installedQty || 0);
@@ -1522,71 +1579,74 @@ async function renderBOQ() {
   const deliveryPct = totalBid > 0 ? (totalDelivered / totalBid * 100) : 0;
   const installPct = totalBid > 0 ? (totalInstalled / totalBid * 100) : 0;
 
-  // Stats cards
+  // Filter info text
+  document.getElementById('boqFilterInfo').textContent = isAll
+    ? `${boqTasks.length} task${boqTasks.length !== 1 ? 's' : ''} • ${allBOQItems.length} total items`
+    : `Showing ${filteredItems.length} items for this task`;
+
+  // Stats cards — numbers change based on selection
   document.getElementById('boqStats').innerHTML = `
-    <div class="stat-card purple"><div class="stat-label">BOQ Tasks</div><div class="stat-value" style="color:var(--purple)">${boqTaskCount}</div></div>
-    <div class="stat-card"><div class="stat-label">Total Bid Value</div><div class="stat-value">${formatINR(totalBid)}</div><div class="stat-sub">${allBOQItems.length} line items</div></div>
+    <div class="stat-card purple"><div class="stat-label">${isAll ? 'BOQ Tasks' : 'Line Items'}</div><div class="stat-value" style="color:var(--purple)">${isAll ? boqTasks.length : filteredItems.length}</div></div>
+    <div class="stat-card"><div class="stat-label">Bid Value</div><div class="stat-value">${formatINR(totalBid)}</div></div>
     <div class="stat-card amber"><div class="stat-label">Delivered</div><div class="stat-value" style="color:var(--amber)">${deliveryPct.toFixed(0)}%</div><div class="stat-sub">${formatINR(totalDelivered)}</div></div>
     <div class="stat-card green"><div class="stat-label">Installed</div><div class="stat-value" style="color:var(--green)">${installPct.toFixed(0)}%</div><div class="stat-sub">${formatINR(totalInstalled)}</div></div>
   `;
 
-  // Task cards with progress
-  document.getElementById('boqTasksList').innerHTML = boqTaskCount === 0
-    ? '<div style="text-align:center;padding:40px;color:var(--text-muted)"><div style="font-size:40px;margin-bottom:8px">📦</div>No BOQ tasks yet. Create a task with "Attach BOQ Items" checked.</div>'
-    : boqTasks.map(task => {
-        const taskItems = allBOQItems.filter(i => i.linkedTaskId === task.id);
-        const taskBid = taskItems.reduce((s, i) => s + (i.unitRate||0) * (i.bidQty||0), 0);
-        const taskDel = taskItems.reduce((s, i) => s + (i.unitRate||0) * (i.deliveredQty||0), 0);
-        const taskIns = taskItems.reduce((s, i) => s + (i.unitRate||0) * (i.installedQty||0), 0);
-        const delPct = taskBid > 0 ? (taskDel/taskBid*100) : 0;
-        const insPct = taskBid > 0 ? (taskIns/taskBid*100) : 0;
-        return `<div class="boq-task-card">
-          <div class="boq-task-header">
-            <div>
-              <div class="boq-task-title">${task.taskName || task.id}</div>
-              <div class="boq-task-meta">${task.id} • ${task.siteName} • Assigned to: ${task.assignedTo} • ${taskItems.length} items</div>
-            </div>
-            <div><strong style="color:var(--blue)">${formatINR(taskBid)}</strong></div>
+  // Task progress card (show when specific task selected)
+  if (!isAll && filteredTasks.length > 0) {
+    const task = filteredTasks[0];
+    document.getElementById('boqTaskProgress').innerHTML = `
+      <div class="boq-task-card">
+        <div class="boq-task-header">
+          <div>
+            <div class="boq-task-title">${task.taskName}</div>
+            <div class="boq-task-meta">${task.id} • ${task.siteName} • Assigned to: <strong>${task.assignedTo}</strong> • ${filteredItems.length} items</div>
           </div>
-          <div class="boq-progress-row">
-            <div class="boq-progress-item">
-              <div class="boq-progress-label">Delivery Progress</div>
-              <div class="boq-progress-bar"><div class="boq-progress-fill" style="width:${delPct}%;background:var(--amber)"></div></div>
-              <div class="boq-progress-value" style="color:var(--amber)">${delPct.toFixed(0)}% — ${formatINR(taskDel)}</div>
-            </div>
-            <div class="boq-progress-item">
-              <div class="boq-progress-label">Installation Progress</div>
-              <div class="boq-progress-bar"><div class="boq-progress-fill" style="width:${insPct}%;background:var(--green)"></div></div>
-              <div class="boq-progress-value" style="color:var(--green)">${insPct.toFixed(0)}% — ${formatINR(taskIns)}</div>
-            </div>
+          <div style="text-align:right">
+            <div style="font-size:10px;color:var(--text-muted)">BID VALUE</div>
+            <div style="font-size:18px;font-weight:900;color:var(--blue)">${formatINR(totalBid)}</div>
           </div>
-        </div>`;
-      }).join('');
+        </div>
+        <div class="boq-progress-row">
+          <div class="boq-progress-item">
+            <div class="boq-progress-label">Delivery Progress</div>
+            <div class="boq-progress-bar"><div class="boq-progress-fill" style="width:${deliveryPct}%;background:var(--amber)"></div></div>
+            <div class="boq-progress-value" style="color:var(--amber)">${deliveryPct.toFixed(0)}% — ${formatINR(totalDelivered)} of ${formatINR(totalBid)}</div>
+          </div>
+          <div class="boq-progress-item">
+            <div class="boq-progress-label">Installation Progress</div>
+            <div class="boq-progress-bar"><div class="boq-progress-fill" style="width:${installPct}%;background:var(--green)"></div></div>
+            <div class="boq-progress-value" style="color:var(--green)">${installPct.toFixed(0)}% — ${formatINR(totalInstalled)} of ${formatINR(totalBid)}</div>
+          </div>
+        </div>
+      </div>`;
+  } else {
+    document.getElementById('boqTaskProgress').innerHTML = '';
+  }
 
-  // Excel-like sheet with ALL items
-  document.getElementById('boqItemCountLabel').textContent = `${allBOQItems.length} items`;
+  // Sheet title
+  document.getElementById('boqSheetTitle').textContent = isAll
+    ? '📊 BOQ Items — All Tasks (Sheet View)'
+    : `📊 BOQ Items — ${filteredTasks[0]?.taskName || selectedTaskId}`;
+  document.getElementById('boqItemCountLabel').textContent = `${filteredItems.length} items`;
 
-  if (allBOQItems.length === 0) {
-    document.getElementById('boqItemsSheet').innerHTML = '<tr><td colspan="17" style="text-align:center;padding:40px;color:var(--text-muted)">No BOQ items yet</td></tr>';
+  if (filteredItems.length === 0) {
+    document.getElementById('boqItemsSheet').innerHTML = '<tr><td colspan="15" style="text-align:center;padding:40px;color:var(--text-muted)"><div style="font-size:40px;margin-bottom:8px">📦</div>No BOQ items. Create a task with "Attach BOQ Items" checked.</td></tr>';
     document.getElementById('boqItemsFooter').innerHTML = '';
     return;
   }
 
-  // Find task info for each item
-  const taskMap = {};
-  allTasks.forEach(t => { taskMap[t.id] = t; });
-
-  document.getElementById('boqItemsSheet').innerHTML = allBOQItems.map((item, idx) => {
+  // Render items sheet
+  document.getElementById('boqItemsSheet').innerHTML = filteredItems.map((item, idx) => {
     const bidAmt = (item.unitRate||0) * (item.bidQty||0);
     const delAmt = (item.unitRate||0) * (item.deliveredQty||0);
     const insAmt = (item.unitRate||0) * (item.installedQty||0);
     const balDel = (item.bidQty||0) - (item.deliveredQty||0);
     const balIns = (item.bidQty||0) - (item.installedQty||0);
-    const task = taskMap[item.linkedTaskId] || {};
     const condClass = !item.materialCondition ? '' : item.materialCondition.includes('Good') ? 'cell-green' : item.materialCondition.includes('damage') || item.materialCondition.includes('Missing') ? 'cell-red' : 'cell-amber';
-    const bgColor = idx % 2 === 0 ? '' : 'background:#fafbff';
+    const bg = idx % 2 === 0 ? '' : 'background:#fafbff';
 
-    return `<tr style="${bgColor}">
+    return `<tr style="${bg}">
       <td class="cell-center">${item.slNo || idx+1}</td>
       <td>${item.description || ''}</td>
       <td>${item.itemCode || ''}</td>
@@ -1602,8 +1662,7 @@ async function renderBOQ() {
       <td class="cell-right">${formatINR(insAmt)}</td>
       <td class="cell-center ${balIns > 0 ? 'cell-red' : 'cell-green'}">${balIns}</td>
       <td class="${condClass}" style="font-size:11px">${item.materialCondition || '—'}</td>
-      <td style="font-size:11px;font-family:monospace">${item.linkedTaskId || '—'}</td>
-      <td style="font-size:11px">${task.assignedTo || '—'}</td>
+      <td style="font-size:10px;color:var(--text-secondary)">${item.lastUpdatedBy ? `${item.lastUpdatedBy}<br>${formatTime(item.lastUpdatedAt)}` : '—'}</td>
     </tr>`;
   }).join('');
 
@@ -1615,9 +1674,264 @@ async function renderBOQ() {
     <td class="cell-right">${formatINR(totalDelivered)}</td>
     <td></td><td></td>
     <td class="cell-right">${formatINR(totalInstalled)}</td>
-    <td></td><td></td><td></td><td></td>
+    <td></td><td></td><td></td>
   </tr>`;
+
+  // Draw charts
+  drawBOQCharts(filteredItems, totalBid, totalDelivered, totalInstalled, deliveryPct, installPct);
+
+  // Show AI summary section
+  document.getElementById('boqAISummary').style.display = filteredItems.length > 0 ? 'block' : 'none';
+  if (filteredItems.length > 0) generateAISummary();
 }
+
+// ─── CHART DRAWING ───
+function drawBOQCharts(items, totalBid, totalDelivered, totalInstalled, delPct, insPct) {
+  // 1. Progress Ring
+  const ringCanvas = document.getElementById('boqProgressRing');
+  const ringCtx = ringCanvas.getContext('2d');
+  ringCtx.clearRect(0, 0, 160, 160);
+  const cx = 80, cy = 80, r = 60, lw = 14;
+  const avgPct = (delPct + insPct) / 2;
+
+  // Background ring
+  ringCtx.beginPath();
+  ringCtx.arc(cx, cy, r, 0, 2 * Math.PI);
+  ringCtx.strokeStyle = '#e5e7eb';
+  ringCtx.lineWidth = lw;
+  ringCtx.stroke();
+
+  // Delivery ring (amber)
+  ringCtx.beginPath();
+  ringCtx.arc(cx, cy, r, -Math.PI/2, -Math.PI/2 + (2 * Math.PI * delPct / 100));
+  ringCtx.strokeStyle = '#f59e0b';
+  ringCtx.lineWidth = lw;
+  ringCtx.lineCap = 'round';
+  ringCtx.stroke();
+
+  // Install ring (inner, green)
+  ringCtx.beginPath();
+  ringCtx.arc(cx, cy, r - 18, -Math.PI/2, -Math.PI/2 + (2 * Math.PI * insPct / 100));
+  ringCtx.strokeStyle = '#16a34a';
+  ringCtx.lineWidth = lw - 4;
+  ringCtx.lineCap = 'round';
+  ringCtx.stroke();
+
+  // Center text
+  ringCtx.fillStyle = '#1a1a2e';
+  ringCtx.font = 'bold 24px Arial';
+  ringCtx.textAlign = 'center';
+  ringCtx.fillText(`${avgPct.toFixed(0)}%`, cx, cy + 4);
+  ringCtx.font = '10px Arial';
+  ringCtx.fillStyle = '#9aa0a6';
+  ringCtx.fillText('avg progress', cx, cy + 18);
+
+  document.getElementById('boqProgressLabel').innerHTML = `<span style="color:#f59e0b">■</span> Delivery ${delPct.toFixed(0)}% &nbsp; <span style="color:#16a34a">■</span> Install ${insPct.toFixed(0)}%`;
+
+  // 2. Bar Chart
+  const barCanvas = document.getElementById('boqBarChart');
+  const barCtx = barCanvas.getContext('2d');
+  const bw = barCanvas.width, bh = barCanvas.height;
+  barCtx.clearRect(0, 0, bw, bh);
+  const maxVal = Math.max(totalBid, 1);
+  const barW = 50, gap = 30, startX = 80;
+
+  const bars = [
+    { label: 'Bid', value: totalBid, color: '#3b82f6' },
+    { label: 'Delivered', value: totalDelivered, color: '#f59e0b' },
+    { label: 'Installed', value: totalInstalled, color: '#16a34a' },
+    { label: 'Balance', value: totalBid - totalInstalled, color: '#ef4444' },
+  ];
+
+  bars.forEach((b, i) => {
+    const x = startX + i * (barW + gap);
+    const barH = (b.value / maxVal) * (bh - 50);
+    const y = bh - 25 - barH;
+
+    barCtx.fillStyle = b.color;
+    barCtx.beginPath();
+    barCtx.roundRect(x, y, barW, barH, 4);
+    barCtx.fill();
+
+    barCtx.fillStyle = '#1a1a2e';
+    barCtx.font = 'bold 10px Arial';
+    barCtx.textAlign = 'center';
+    barCtx.fillText(formatINR(b.value), x + barW/2, y - 5);
+
+    barCtx.fillStyle = '#666';
+    barCtx.font = '10px Arial';
+    barCtx.fillText(b.label, x + barW/2, bh - 8);
+  });
+
+  // 3. Pie Chart (Delivery status)
+  const pieCanvas = document.getElementById('boqPieChart');
+  const pieCtx = pieCanvas.getContext('2d');
+  pieCtx.clearRect(0, 0, 160, 160);
+  const pcx = 80, pcy = 75, pr = 55;
+
+  const fullyDel = items.filter(i => (i.deliveredQty||0) >= (i.bidQty||0)).length;
+  const partDel = items.filter(i => (i.deliveredQty||0) > 0 && (i.deliveredQty||0) < (i.bidQty||0)).length;
+  const noDel = items.filter(i => (i.deliveredQty||0) === 0).length;
+  const total = items.length || 1;
+
+  const slices = [
+    { label: 'Delivered', count: fullyDel, color: '#16a34a' },
+    { label: 'Partial', count: partDel, color: '#f59e0b' },
+    { label: 'Pending', count: noDel, color: '#ef4444' },
+  ];
+
+  let startAngle = -Math.PI / 2;
+  slices.forEach(s => {
+    if (s.count === 0) return;
+    const sliceAngle = (s.count / total) * 2 * Math.PI;
+    pieCtx.beginPath();
+    pieCtx.moveTo(pcx, pcy);
+    pieCtx.arc(pcx, pcy, pr, startAngle, startAngle + sliceAngle);
+    pieCtx.closePath();
+    pieCtx.fillStyle = s.color;
+    pieCtx.fill();
+    startAngle += sliceAngle;
+  });
+
+  // Center hole (donut)
+  pieCtx.beginPath();
+  pieCtx.arc(pcx, pcy, 30, 0, 2 * Math.PI);
+  pieCtx.fillStyle = '#fff';
+  pieCtx.fill();
+  pieCtx.fillStyle = '#1a1a2e';
+  pieCtx.font = 'bold 16px Arial';
+  pieCtx.textAlign = 'center';
+  pieCtx.fillText(items.length, pcx, pcy + 6);
+
+  document.getElementById('boqPieLabel').innerHTML = `<span style="color:#16a34a">■</span> ${fullyDel} done &nbsp; <span style="color:#f59e0b">■</span> ${partDel} partial &nbsp; <span style="color:#ef4444">■</span> ${noDel} pending`;
+}
+
+// ─── AI SUMMARY (uses Claude API) ───
+window.generateAISummary = async function() {
+  const summaryEl = document.getElementById('boqAISummaryText');
+  summaryEl.textContent = 'Generating summary...';
+
+  const filterEl = document.getElementById('boqTaskFilter');
+  const selectedTaskId = filterEl.value;
+  const isAll = selectedTaskId === 'all';
+  const filteredItems = isAll ? allBOQItems : allBOQItems.filter(i => i.linkedTaskId === selectedTaskId);
+  const boqTasks = allTasks.filter(t => t.hasBOQ);
+  const taskName = isAll ? 'All BOQ Tasks' : (boqTasks.find(t => t.id === selectedTaskId)?.taskName || selectedTaskId);
+
+  if (filteredItems.length === 0) {
+    summaryEl.textContent = 'No BOQ items to summarize.';
+    return;
+  }
+
+  // Build data summary for AI
+  let totalBid = 0, totalDel = 0, totalIns = 0;
+  const itemSummaries = filteredItems.map(item => {
+    const bid = (item.unitRate||0) * (item.bidQty||0);
+    const del = (item.unitRate||0) * (item.deliveredQty||0);
+    const ins = (item.unitRate||0) * (item.installedQty||0);
+    totalBid += bid; totalDel += del; totalIns += ins;
+    return `${item.description}: Bid ${item.bidQty}, Delivered ${item.deliveredQty||0}, Installed ${item.installedQty||0}, Condition: ${item.materialCondition || 'Not checked'}`;
+  });
+
+  const prompt = `You are a project manager reviewing a BOQ (Bill of Quantities) status report for "${taskName}". Give a brief 3-4 sentence executive summary covering: overall completion status, items that need attention (pending delivery or installation), any material condition concerns, and a risk assessment. Be specific with numbers. Keep it professional and concise.
+
+Data:
+Total Items: ${filteredItems.length}
+Total Bid Value: ₹${totalBid.toFixed(0)}
+Total Delivered Value: ₹${totalDel.toFixed(0)} (${totalBid>0?(totalDel/totalBid*100).toFixed(0):0}%)
+Total Installed Value: ₹${totalIns.toFixed(0)} (${totalBid>0?(totalIns/totalBid*100).toFixed(0):0}%)
+
+Item Details:
+${itemSummaries.join('\n')}`;
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 300,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+    const data = await response.json();
+    const text = data.content?.map(c => c.text || '').join('') || 'Unable to generate summary.';
+    summaryEl.textContent = text;
+  } catch (e) {
+    // Fallback: generate summary locally
+    const fullyIns = filteredItems.filter(i => (i.installedQty||0) >= (i.bidQty||0)).length;
+    const pendingDel = filteredItems.filter(i => (i.deliveredQty||0) === 0);
+    const damaged = filteredItems.filter(i => i.materialCondition && (i.materialCondition.includes('Damaged') || i.materialCondition.includes('Missing')));
+    const delPct = totalBid > 0 ? (totalDel/totalBid*100).toFixed(0) : 0;
+    const insPct = totalBid > 0 ? (totalIns/totalBid*100).toFixed(0) : 0;
+
+    let summary = `${taskName}: ${fullyIns} of ${filteredItems.length} items fully installed (${insPct}% by value). Delivery progress at ${delPct}%.`;
+    if (pendingDel.length > 0) summary += ` ${pendingDel.length} item${pendingDel.length>1?'s':''} pending delivery: ${pendingDel.slice(0,3).map(i=>i.description).join(', ')}${pendingDel.length>3?'...':''}.`;
+    if (damaged.length > 0) summary += ` ⚠️ ${damaged.length} item${damaged.length>1?'s':''} with condition issues requiring attention.`;
+    if (fullyIns === filteredItems.length) summary += ' ✅ All items fully installed.';
+    else if (insPct < 50) summary += ' 🔴 Installation below 50% — requires acceleration.';
+
+    summaryEl.textContent = summary;
+  }
+};
+
+// ─── EXPORT BOQ TO EXCEL ───
+window.exportBOQExcel = function() {
+  const filterEl = document.getElementById('boqTaskFilter');
+  const selectedTaskId = filterEl.value;
+  const isAll = selectedTaskId === 'all';
+  const filteredItems = isAll ? allBOQItems : allBOQItems.filter(i => i.linkedTaskId === selectedTaskId);
+
+  if (filteredItems.length === 0) {
+    alert('No BOQ items to export.');
+    return;
+  }
+
+  // Build CSV content
+  const headers = ['Sl.No','Description','Item Code','Item Type','Bid Qty','Units','Unit Rate','Bid Total Amount','Delivered Qty','Delivered Amount','Balance to Deliver','Installed Qty','Installed Amount','Balance to Install','Material Condition','Last Updated'];
+  const rows = filteredItems.map((item, idx) => {
+    const bidAmt = (item.unitRate||0) * (item.bidQty||0);
+    const delAmt = (item.unitRate||0) * (item.deliveredQty||0);
+    const insAmt = (item.unitRate||0) * (item.installedQty||0);
+    return [
+      item.slNo || idx+1,
+      `"${(item.description||'').replace(/"/g,'""')}"`,
+      item.itemCode||'',
+      item.itemType||'',
+      item.bidQty||0,
+      item.units||'',
+      item.unitRate||0,
+      bidAmt.toFixed(2),
+      item.deliveredQty||0,
+      delAmt.toFixed(2),
+      (item.bidQty||0)-(item.deliveredQty||0),
+      item.installedQty||0,
+      insAmt.toFixed(2),
+      (item.bidQty||0)-(item.installedQty||0),
+      `"${(item.materialCondition||'').replace(/"/g,'""')}"`,
+      item.lastUpdatedAt || '—',
+    ].join(',');
+  });
+
+  // Add totals row
+  let tBid=0, tDel=0, tIns=0;
+  filteredItems.forEach(i => {
+    tBid += (i.unitRate||0)*(i.bidQty||0);
+    tDel += (i.unitRate||0)*(i.deliveredQty||0);
+    tIns += (i.unitRate||0)*(i.installedQty||0);
+  });
+  rows.push(`,,,,,,TOTAL,${tBid.toFixed(2)},,${tDel.toFixed(2)},,,,${tIns.toFixed(2)},,,`);
+
+  const csv = '\uFEFF' + headers.join(',') + '\n' + rows.join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const taskLabel = isAll ? 'All_Tasks' : selectedTaskId;
+  a.download = `BOQ_Export_${taskLabel}_${new Date().toISOString().split('T')[0]}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
 
 function severityBadge(s) {
   const map = { CRITICAL: 'badge-red', HIGH: 'badge-red', MEDIUM: 'badge-amber', LOW: 'badge-blue' };
