@@ -472,6 +472,18 @@ tr:hover { background: #f8faff; }
 .template-card .tpl-icon { font-size: 28px; margin-bottom: 4px; }
 .template-card .tpl-name { font-size: 13px; font-weight: 700; }
 .template-card .tpl-desc { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+/* ─── BOQ CATALOG GRID (Sprint 6A) ─── */
+.boq-grid-wrap { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-top: 8px; }
+.boq-grid-empty { padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px; }
+.boq-grid-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.boq-grid-table th { background: #fafbff; padding: 8px 10px; text-align: left; font-size: 10px; text-transform: uppercase; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+.boq-grid-table td { padding: 6px 10px; border-bottom: 1px solid #f0f2f5; vertical-align: middle; }
+.boq-grid-table tr.row-disabled td { opacity: 0.4; }
+.boq-grid-locked { color: var(--text-secondary); }
+.boq-grid-qty-input { width: 70px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; font-family: inherit; background: #fff; }
+.boq-grid-qty-input:disabled { background: #f3f4f6; }
+.boq-grid-footer { padding: 8px 10px; font-size: 11px; color: var(--text-secondary); background: #fafbff; border-top: 1px solid var(--border); }
 </style>
 </head>
 <body>
@@ -806,8 +818,12 @@ tr:hover { background: #f8faff; }
         <p style="font-size:12px;color:var(--text-muted);margin-top:4px">Enable if this task involves material delivery and installation tracking</p>
       </div>
       <div id="ctBOQSection" style="display:none">
-        <div id="ctBOQItemsList"></div>
-        <button class="filter-btn" onclick="addTaskBOQItemRow()" style="margin-top:8px;padding:8px 16px">+ Add BOQ Item</button>
+        <div id="ctBOQCatalogGrid"></div>
+        <!-- Fallback for templates with no fixed catalog (e.g. General) -->
+        <div id="ctBOQManualSection" style="display:none">
+          <div id="ctBOQItemsList"></div>
+          <button class="filter-btn" onclick="addTaskBOQItemRow()" style="margin-top:8px;padding:8px 16px">+ Add BOQ Item</button>
+        </div>
       </div>
 
       <button class="form-submit" id="ctSubmitBtn" onclick="createNewTask()">Create & Assign Task</button>
@@ -916,6 +932,56 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+
+// ─── BOQ CATALOGS (Sprint 6A) ───
+// Keep this in sync with utils/boqCatalog.js in the mobile app repo.
+// Manager only edits QUANTITY at task creation — everything else here
+// (item name, code, category, unit) is fixed reference data.
+const BOQ_CATALOGS = {
+  CCTV_SURVEILLANCE: [
+    { slNo: 1, description: 'IP Dome Camera 4MP', itemCode: 'CAM-DOME-4MP', itemType: 'Hardware', units: 'Number', unitRate: 6500 },
+    { slNo: 2, description: 'IP Bullet Camera 4MP', itemCode: 'CAM-BULLET-4MP', itemType: 'Hardware', units: 'Number', unitRate: 7200 },
+    { slNo: 3, description: 'PTZ Camera 2MP', itemCode: 'CAM-PTZ-2MP', itemType: 'Hardware', units: 'Number', unitRate: 42000 },
+    { slNo: 4, description: 'Network Video Recorder 16CH', itemCode: 'NVR-16CH', itemType: 'Hardware', units: 'Number', unitRate: 28000 },
+    { slNo: 5, description: 'CAT6 Cable', itemCode: 'CBL-CAT6', itemType: 'Hardware', units: 'Meter', unitRate: 18 },
+    { slNo: 6, description: 'PoE Switch 8-Port', itemCode: 'SW-POE-8P', itemType: 'Hardware', units: 'Number', unitRate: 6800 },
+    { slNo: 7, description: 'Full HD Monitor 21.5"', itemCode: 'MON-215FHD', itemType: 'Hardware', units: 'Number', unitRate: 8500 },
+    { slNo: 8, description: 'USB Mouse', itemCode: 'ACC-MOUSE', itemType: 'Hardware', units: 'Number', unitRate: 350 },
+    { slNo: 9, description: 'UPS 1KVA', itemCode: 'UPS-1KVA', itemType: 'Hardware', units: 'Number', unitRate: 7500 },
+    { slNo: 10, description: 'Surveillance Hard Disk 4TB', itemCode: 'HDD-4TB-SURV', itemType: 'Hardware', units: 'Number', unitRate: 9200 },
+    { slNo: 11, description: 'Camera Mounting Bracket', itemCode: 'ACC-BRACKET', itemType: 'Hardware', units: 'Number', unitRate: 450 },
+    { slNo: 12, description: 'VMS Software License', itemCode: 'SW-VMS-LIC', itemType: 'Software', units: 'Number', unitRate: 3500 },
+  ],
+  TELECOM_NETWORK: [
+    { slNo: 1, description: 'Telecom Rack 42U', itemCode: 'RACK-42U', itemType: 'Hardware', units: 'Number', unitRate: 32000 },
+    { slNo: 2, description: 'Fiber Optic Cable (Single Mode)', itemCode: 'CBL-FIBER-SM', itemType: 'Hardware', units: 'Meter', unitRate: 45 },
+    { slNo: 3, description: 'Patch Panel 24-Port', itemCode: 'PP-24P', itemType: 'Hardware', units: 'Number', unitRate: 3200 },
+    { slNo: 4, description: 'Core Network Switch 24-Port', itemCode: 'SW-CORE-24P', itemType: 'Hardware', units: 'Number', unitRate: 65000 },
+    { slNo: 5, description: 'Router (Enterprise)', itemCode: 'RTR-ENT', itemType: 'Hardware', units: 'Number', unitRate: 48000 },
+    { slNo: 6, description: 'RF Antenna', itemCode: 'ANT-RF', itemType: 'Hardware', units: 'Number', unitRate: 22000 },
+    { slNo: 7, description: 'Tower Mounting Kit', itemCode: 'KIT-TOWER-MNT', itemType: 'Hardware', units: 'Set', unitRate: 15000 },
+    { slNo: 8, description: 'Earthing Kit', itemCode: 'KIT-EARTH', itemType: 'Hardware', units: 'Set', unitRate: 4500 },
+    { slNo: 9, description: 'Network Management Software License', itemCode: 'SW-NMS-LIC', itemType: 'Software', units: 'Number', unitRate: 12000 },
+  ],
+  FIRE_SAFETY: [
+    { slNo: 1, description: 'Smoke Detector', itemCode: 'FS-SMOKE-DET', itemType: 'Hardware', units: 'Number', unitRate: 1800 },
+    { slNo: 2, description: 'Heat Detector', itemCode: 'FS-HEAT-DET', itemType: 'Hardware', units: 'Number', unitRate: 1600 },
+    { slNo: 3, description: 'Fire Alarm Control Panel', itemCode: 'FS-PANEL', itemType: 'Hardware', units: 'Number', unitRate: 35000 },
+    { slNo: 4, description: 'Manual Call Point', itemCode: 'FS-MCP', itemType: 'Hardware', units: 'Number', unitRate: 950 },
+    { slNo: 5, description: 'Fire Hooter / Sounder', itemCode: 'FS-HOOTER', itemType: 'Hardware', units: 'Number', unitRate: 1200 },
+    { slNo: 6, description: 'Sprinkler Head', itemCode: 'FS-SPRINKLER', itemType: 'Hardware', units: 'Number', unitRate: 650 },
+    { slNo: 7, description: 'Fire Extinguisher (ABC 4kg)', itemCode: 'FS-EXT-ABC4', itemType: 'Hardware', units: 'Number', unitRate: 2200 },
+    { slNo: 8, description: 'Fire Alarm Cable', itemCode: 'FS-CABLE', itemType: 'Hardware', units: 'Meter', unitRate: 22 },
+  ],
+  POWER_BACKUP: [
+    { slNo: 1, description: 'Diesel Generator 25KVA', itemCode: 'GEN-25KVA', itemType: 'Hardware', units: 'Number', unitRate: 450000 },
+    { slNo: 2, description: 'UPS System 3KVA', itemCode: 'UPS-3KVA', itemType: 'Hardware', units: 'Number', unitRate: 32000 },
+    { slNo: 3, description: 'Battery Bank (12V 100Ah)', itemCode: 'BAT-12V100AH', itemType: 'Hardware', units: 'Set', unitRate: 9500 },
+    { slNo: 4, description: 'Automatic Transfer Switch', itemCode: 'ATS-STD', itemType: 'Hardware', units: 'Number', unitRate: 28000 },
+    { slNo: 5, description: 'Fuel Tank 500L', itemCode: 'TANK-FUEL-500L', itemType: 'Hardware', units: 'Number', unitRate: 18000 },
+    { slNo: 6, description: 'Power Cable (Armoured)', itemCode: 'CBL-POWER-ARM', itemType: 'Hardware', units: 'Meter', unitRate: 85 },
+  ],
+};
 
 // ─── STATE ───
 let allSurveys = [];
@@ -1108,11 +1174,11 @@ async function loadTemplates() {
 
 function getDefaultTemplates() {
   return [
-    { id: 'TPL-GENERAL-001', name: 'General Site Survey', description: 'Standard general-purpose inspection', icon: '📋', category: 'General' },
-    { id: 'TPL-HVAC-001', name: 'HVAC Inspection', description: 'Heating, ventilation & AC check', icon: '❄️', category: 'Electrical' },
-    { id: 'TPL-NET-001', name: 'Network Equipment Check', description: 'Switches, routers & cabling', icon: '🌐', category: 'IT Infrastructure' },
-    { id: 'TPL-FIRE-001', name: 'Fire Safety Audit', description: 'Fire alarm & safety systems', icon: '🔥', category: 'Safety' },
-    { id: 'TPL-GEN-001', name: 'Generator Maintenance', description: 'Fuel, oil & performance check', icon: '⚡', category: 'Power' },
+    { id: 'TPL-CCTV-001', name: 'CCTV / Video Surveillance', description: 'Camera, NVR & surveillance install', icon: '📹', category: 'Security', boqCatalogType: 'CCTV_SURVEILLANCE' },
+    { id: 'TPL-NET-001', name: 'Telecom & Network Infrastructure', description: 'Racks, fiber, switches & towers', icon: '🌐', category: 'IT Infrastructure', boqCatalogType: 'TELECOM_NETWORK' },
+    { id: 'TPL-FIRE-001', name: 'Fire Safety Audit', description: 'Fire alarm & safety systems', icon: '🔥', category: 'Safety', boqCatalogType: 'FIRE_SAFETY' },
+    { id: 'TPL-GEN-001', name: 'Power Backup', description: 'Generator, UPS & battery check', icon: '⚡', category: 'Power', boqCatalogType: 'POWER_BACKUP' },
+    { id: 'TPL-GENERAL-001', name: 'General Site Survey', description: 'Standard general-purpose inspection', icon: '📋', category: 'General', boqCatalogType: null },
   ];
 }
 
@@ -1174,6 +1240,12 @@ window.showCreateTaskModal = function() {
   document.getElementById('ctSite').value = '';
   document.getElementById('ctCustomer').value = '';
   document.getElementById('ctContact').value = '';
+  document.getElementById('ctHasBOQ').checked = false;
+  document.getElementById('ctBOQSection').style.display = 'none';
+  document.getElementById('ctBOQCatalogGrid').innerHTML = '';
+  document.getElementById('ctBOQManualSection').style.display = 'none';
+  document.getElementById('ctBOQItemsList').innerHTML = '';
+  taskBOQCounter = 0;
 
   document.getElementById('createTaskOverlay').classList.add('active');
 };
@@ -1186,6 +1258,10 @@ window.selectTemplate = function(tplId) {
   selectedTemplateId = tplId;
   document.querySelectorAll('.template-card').forEach(c => c.classList.remove('selected'));
   document.getElementById('tpl-' + tplId)?.classList.add('selected');
+  // If BOQ is attached, refresh the grid for the newly selected template's catalog
+  if (document.getElementById('ctHasBOQ').checked) {
+    renderBOQCatalogGrid();
+  }
 };
 
 window.createNewTask = async function() {
@@ -1208,7 +1284,41 @@ window.createNewTask = async function() {
 
   // Collect BOQ items if enabled
   let boqItems = [];
-  if (hasBOQ) {
+  const selectedTpl = allTemplates.find(t => t.id === selectedTemplateId);
+  const activeCatalogType = selectedTpl?.boqCatalogType;
+  const usingCatalog = hasBOQ && activeCatalogType && (BOQ_CATALOGS[activeCatalogType] || []).length > 0;
+
+  if (usingCatalog) {
+    // Read from the Excel-style catalog grid — only checked rows with qty > 0
+    const catalogItems = BOQ_CATALOGS[activeCatalogType];
+    document.querySelectorAll('.ct-cat-include').forEach(checkbox => {
+      const slNo = Number(checkbox.dataset.slno);
+      if (!checkbox.checked) return;
+      const qtyInput = document.querySelector(`.ct-cat-qty[data-slno="${slNo}"]`);
+      const qty = Number(qtyInput?.value) || 0;
+      if (qty <= 0) return;
+      const catalogItem = catalogItems.find(i => i.slNo === slNo);
+      if (!catalogItem) return;
+      boqItems.push({
+        slNo: catalogItem.slNo,
+        description: catalogItem.description,
+        itemCode: catalogItem.itemCode,
+        itemType: catalogItem.itemType,
+        bidQty: qty,
+        units: catalogItem.units,
+        unitRate: catalogItem.unitRate,
+        deliveredQty: 0,
+        installedQty: 0,
+        materialCondition: '',
+        installationNotes: '',
+      });
+    });
+    if (boqItems.length === 0) {
+      alert('Please enter a quantity for at least one BOQ item, or uncheck "Attach BOQ Items".');
+      return;
+    }
+  } else if (hasBOQ) {
+    // Manual entry fallback (General template — no fixed catalog)
     const rows = document.querySelectorAll('[id^="ct-boq-item-"]');
     let slNo = 1;
     rows.forEach(row => {
@@ -1295,10 +1405,82 @@ let taskBOQCounter = 0;
 window.toggleBOQItems = function() {
   const checked = document.getElementById('ctHasBOQ').checked;
   document.getElementById('ctBOQSection').style.display = checked ? 'block' : 'none';
-  if (checked && document.querySelectorAll('[id^="ct-boq-item-"]').length === 0) {
-    addTaskBOQItemRow();
-    addTaskBOQItemRow();
+  if (checked) {
+    renderBOQCatalogGrid();
   }
+};
+
+// ─── BOQ CATALOG GRID (Sprint 6A) ───
+// Renders the Excel-style grid for the currently selected survey template's
+// BOQ catalog. Item name/code/category/unit are locked; only Quantity and
+// the Include checkbox are editable. Templates with no catalog (General)
+// fall back to the old free-form "+ Add BOQ Item" rows.
+window.renderBOQCatalogGrid = function() {
+  const gridEl = document.getElementById('ctBOQCatalogGrid');
+  const manualEl = document.getElementById('ctBOQManualSection');
+
+  if (!selectedTemplateId) {
+    gridEl.innerHTML = '<div class="boq-grid-empty">Select a survey template above first.</div>';
+    manualEl.style.display = 'none';
+    return;
+  }
+
+  const tpl = allTemplates.find(t => t.id === selectedTemplateId);
+  const catalogType = tpl?.boqCatalogType;
+  const catalogItems = catalogType ? (BOQ_CATALOGS[catalogType] || []) : [];
+
+  if (!catalogType || catalogItems.length === 0) {
+    // General / no fixed catalog — use manual entry rows
+    gridEl.innerHTML = '<div class="boq-grid-empty">This template has no fixed item catalog — add items manually below.</div>';
+    manualEl.style.display = 'block';
+    if (document.querySelectorAll('[id^="ct-boq-item-"]').length === 0) {
+      addTaskBOQItemRow();
+      addTaskBOQItemRow();
+    }
+    return;
+  }
+
+  manualEl.style.display = 'none';
+  gridEl.innerHTML = `
+    <div class="boq-grid-wrap">
+      <table class="boq-grid-table">
+        <thead>
+          <tr>
+            <th style="width:28px"></th>
+            <th style="width:28px">Sl</th>
+            <th>Item Name</th>
+            <th style="width:70px">Code</th>
+            <th style="width:70px">Category</th>
+            <th style="width:60px">Unit</th>
+            <th style="width:90px">Quantity</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${catalogItems.map(item => `
+            <tr id="ct-cat-row-${item.slNo}">
+              <td><input type="checkbox" class="ct-cat-include" data-slno="${item.slNo}" checked onchange="onCatalogRowToggle(${item.slNo})"></td>
+              <td>${item.slNo}</td>
+              <td class="boq-grid-locked">${item.description}</td>
+              <td class="boq-grid-locked">${item.itemCode}</td>
+              <td class="boq-grid-locked">${item.itemType}</td>
+              <td class="boq-grid-locked">${item.units}</td>
+              <td><input type="number" min="0" class="boq-grid-qty-input ct-cat-qty" data-slno="${item.slNo}" placeholder="0" value=""></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+      <div class="boq-grid-footer">Only Quantity is editable — item name, code, category, and unit are fixed for this project type. Uncheck a row to exclude it. Leave quantity blank/0 to skip.</div>
+    </div>
+  `;
+};
+
+window.onCatalogRowToggle = function(slNo) {
+  const row = document.getElementById('ct-cat-row-' + slNo);
+  const checkbox = row?.querySelector('.ct-cat-include');
+  const qtyInput = row?.querySelector('.ct-cat-qty');
+  if (!row) return;
+  row.classList.toggle('row-disabled', !checkbox.checked);
+  if (qtyInput) qtyInput.disabled = !checkbox.checked;
 };
 
 window.addTaskBOQItemRow = function() {
