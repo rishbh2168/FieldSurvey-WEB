@@ -592,6 +592,7 @@ tr:hover { background: #f8faff; }
               <button class="filter-btn active" data-task-filter="all" onclick="filterTasks('all')">All</button>
               <button class="filter-btn" data-task-filter="active" onclick="filterTasks('active')">Active</button>
               <button class="filter-btn" data-task-filter="completed" onclick="filterTasks('completed')">Completed</button>
+              <button class="filter-btn" data-task-filter="closed" onclick="filterTasks('closed')">Closed</button>
             </div>
           </div>
         </div>
@@ -627,6 +628,21 @@ tr:hover { background: #f8faff; }
       <div class="table-card">
         <div class="table-header">
           <span class="table-title">Engineer Activity</span>
+          <button class="action-btn approve" onclick="showAddEngineerForm()" style="padding:8px 16px;font-size:13px">+ Add Engineer</button>
+        </div>
+        <div id="addEngineerForm" style="display:none;padding:16px 20px;border-bottom:1px solid var(--border);background:#fafbff">
+          <div class="form-row">
+            <div class="form-group" style="margin-bottom:8px"><input class="form-input" id="newEngName" placeholder="Full name" style="margin-bottom:0"></div>
+            <div class="form-group" style="margin-bottom:8px"><input class="form-input" id="newEngEmail" type="email" placeholder="Login email (must match their Firebase Auth account)" style="margin-bottom:0"></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group" style="margin-bottom:8px"><input class="form-input" id="newEngEmpId" placeholder="Employee ID (e.g. EMP-12349)" style="margin-bottom:0"></div>
+            <div style="display:flex;gap:8px;align-items:flex-start">
+              <button class="action-btn approve" onclick="addEngineer()" style="padding:10px 16px">Save</button>
+              <button class="action-btn" onclick="document.getElementById('addEngineerForm').style.display='none'" style="padding:10px 16px;background:#f3f4f6;color:#6b7280">Cancel</button>
+            </div>
+          </div>
+          <p style="font-size:11px;color:var(--text-muted);margin-top:2px">Note: this only adds them to the assignment list. You still need to create their login separately in Firebase Authentication (or have them sign up in the app) with this same email.</p>
         </div>
         <table>
           <thead><tr><th>Engineer</th><th>Email</th><th>Surveys Submitted</th><th>Issues Reported</th><th>Last Active</th></tr></thead>
@@ -800,6 +816,14 @@ tr:hover { background: #f8faff; }
           <input class="form-input" id="ctContact" placeholder="+91-XXX-XXX-XXXX">
         </div>
       </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Customer Email *</label>
+          <input class="form-input" id="ctCustomerEmail" type="email" placeholder="customer@company.com">
+          <p style="font-size:11px;color:var(--text-muted);margin-top:4px">Used to send the customer a verification code at sign-off time</p>
+        </div>
+        <div></div>
+      </div>
 
       <div class="form-group">
         <label class="form-label">Survey Template *</label>
@@ -824,6 +848,14 @@ tr:hover { background: #f8faff; }
           <div id="ctBOQItemsList"></div>
           <button class="filter-btn" onclick="addTaskBOQItemRow()" style="margin-top:8px;padding:8px 16px">+ Add BOQ Item</button>
         </div>
+      </div>
+
+      <!-- Custom Fields (Sprint 6D) -->
+      <div class="form-group" style="margin-top:16px">
+        <label class="form-label">Additional Fields for This Task</label>
+        <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">If something isn't covered by the survey template, add extra fields here — the engineer will see them at the bottom of the survey.</p>
+        <div id="ctCustomFieldsList"></div>
+        <button class="filter-btn" onclick="addTaskCustomFieldRow()" style="margin-top:4px;padding:8px 16px">+ Add Custom Field</button>
       </div>
 
       <button class="form-submit" id="ctSubmitBtn" onclick="createNewTask()">Create & Assign Task</button>
@@ -917,7 +949,7 @@ tr:hover { background: #f8faff; }
 <script type="module">
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js';
 import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js';
-import { getFirestore, collection, getDocs, doc, updateDoc, addDoc, query, orderBy, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js';
+import { getFirestore, collection, getDocs, doc, updateDoc, deleteDoc, addDoc, query, where, orderBy, onSnapshot, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js';
 
 // ─── FIREBASE CONFIG (same as mobile app) ───
 const firebaseConfig = {
@@ -1108,6 +1140,7 @@ window.updateSurveyStatus = async function(idx, newStatus) {
 window.viewTaskDetail = function(idx) {
   const t = allTasks[idx];
   if (!t) return;
+  const isClosed = t.state === 'CLOSED';
   document.getElementById('modalTitle').textContent = `Task: ${t.id}`;
   document.getElementById('modalBody').innerHTML = `
     <div class="detail-row"><div class="detail-label">Work Order</div><div class="detail-value">${t.id}</div></div>
@@ -1122,8 +1155,48 @@ window.viewTaskDetail = function(idx) {
     <div class="detail-row"><div class="detail-label">Duration</div><div class="detail-value">${t.estimatedDuration}</div></div>
     <div style="margin-top:16px"><strong style="font-size:12px;color:var(--text-muted)">HISTORY</strong></div>
     ${(t.history || []).map(h => `<div style="padding:6px 0;border-bottom:1px solid #f0f2f5;font-size:13px">${stateBadge(h.state)} <span style="color:var(--text-secondary)">${h.by} — ${h.timestamp}</span></div>`).join('')}
+    <div style="margin-top:20px;display:flex;gap:8px;flex-wrap:wrap">
+      ${isClosed ? '' : `<button class="action-btn" style="background:#f3f4f6;color:#374151" onclick="closeTask(${idx})">🔒 Close Task</button>`}
+      <button class="action-btn flag" onclick="deleteTask(${idx})">🗑 Delete Task</button>
+    </div>
   `;
   document.getElementById('modalOverlay').classList.add('active');
+};
+
+// ─── CLOSE / DELETE TASK (item 7) ───
+window.closeTask = async function(idx) {
+  const t = allTasks[idx];
+  if (!t) return;
+  if (!confirm(`Close task ${t.id}? It will be marked closed and won't count as active, but stays visible for records.`)) return;
+  const managerName = auth.currentUser?.displayName || auth.currentUser?.email || 'Manager';
+  const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
+  try {
+    await updateDoc(doc(db, 'tasks', t.firestoreId), {
+      state: 'CLOSED',
+      history: [...(t.history || []), { state: 'CLOSED', timestamp: now, by: managerName }],
+    });
+    closeModal();
+  } catch (e) {
+    alert('Failed to close task: ' + e.message);
+  }
+};
+
+window.deleteTask = async function(idx) {
+  const t = allTasks[idx];
+  if (!t) return;
+  if (!confirm(`Permanently delete task ${t.id} — "${t.taskName}"? This also deletes its linked BOQ items and cannot be undone.`)) return;
+  try {
+    if (t.hasBOQ) {
+      const itemsSnap = await getDocs(query(collection(db, 'boq_items'), where('linkedTaskId', '==', t.id)));
+      for (const d of itemsSnap.docs) {
+        await deleteDoc(doc(db, 'boq_items', d.id));
+      }
+    }
+    await deleteDoc(doc(db, 'tasks', t.firestoreId));
+    closeModal();
+  } catch (e) {
+    alert('Failed to delete task: ' + e.message);
+  }
 };
 
 window.viewIssueDetail = function(idx) {
@@ -1181,6 +1254,44 @@ function getDefaultTemplates() {
     { id: 'TPL-GENERAL-001', name: 'General Site Survey', description: 'Standard general-purpose inspection', icon: '📋', category: 'General', boqCatalogType: null },
   ];
 }
+
+window.showAddEngineerForm = function() {
+  document.getElementById('newEngName').value = '';
+  document.getElementById('newEngEmail').value = '';
+  document.getElementById('newEngEmpId').value = '';
+  document.getElementById('addEngineerForm').style.display = 'block';
+};
+
+window.addEngineer = async function() {
+  const name = document.getElementById('newEngName').value.trim();
+  const email = document.getElementById('newEngEmail').value.trim();
+  const empId = document.getElementById('newEngEmpId').value.trim();
+
+  if (!name || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    alert('Please enter a name and a valid email.');
+    return;
+  }
+  if (allEngineers.some(e => e.email.toLowerCase() === email.toLowerCase())) {
+    alert('An engineer with this email already exists.');
+    return;
+  }
+
+  try {
+    await addDoc(collection(db, 'engineers'), {
+      name,
+      email,
+      empId: empId || `EMP-${Math.floor(1000 + Math.random() * 9000)}`,
+      role: 'Field Engineer',
+      createdAt: serverTimestamp(),
+    });
+    await loadEngineers();
+    document.getElementById('addEngineerForm').style.display = 'none';
+    renderEngineers();
+    alert(`${name} added. Remind them to sign up / log in to the mobile app using ${email} — that's how their account gets created in Firebase Authentication.`);
+  } catch (e) {
+    alert('Failed to add engineer: ' + e.message);
+  }
+};
 
 async function loadEngineers() {
   // Load from Firestore engineers collection, or derive from survey/task data
@@ -1240,12 +1351,15 @@ window.showCreateTaskModal = function() {
   document.getElementById('ctSite').value = '';
   document.getElementById('ctCustomer').value = '';
   document.getElementById('ctContact').value = '';
+  document.getElementById('ctCustomerEmail').value = '';
   document.getElementById('ctHasBOQ').checked = false;
   document.getElementById('ctBOQSection').style.display = 'none';
   document.getElementById('ctBOQCatalogGrid').innerHTML = '';
   document.getElementById('ctBOQManualSection').style.display = 'none';
   document.getElementById('ctBOQItemsList').innerHTML = '';
+  document.getElementById('ctCustomFieldsList').innerHTML = '';
   taskBOQCounter = 0;
+  taskCustomFieldCounter = 0;
 
   document.getElementById('createTaskOverlay').classList.add('active');
 };
@@ -1274,11 +1388,16 @@ window.createNewTask = async function() {
   const duration = document.getElementById('ctDuration').value;
   const customer = document.getElementById('ctCustomer').value.trim();
   const contact = document.getElementById('ctContact').value.trim();
+  const customerEmail = document.getElementById('ctCustomerEmail').value.trim();
   const hasBOQ = document.getElementById('ctHasBOQ').checked;
 
   // Validation
   if (!taskName || !description || !siteVal || !engineer || !deadline || !selectedTemplateId) {
     alert('Please fill all required fields and select a survey template.');
+    return;
+  }
+  if (!customerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
+    alert('Please enter a valid customer email — it is required to send the sign-off verification code.');
     return;
   }
 
@@ -1291,6 +1410,7 @@ window.createNewTask = async function() {
   if (usingCatalog) {
     // Read from the Excel-style catalog grid — only checked rows with qty > 0
     const catalogItems = BOQ_CATALOGS[activeCatalogType];
+    let maxSlNo = catalogItems.reduce((m, i) => Math.max(m, i.slNo), 0);
     document.querySelectorAll('.ct-cat-include').forEach(checkbox => {
       const slNo = Number(checkbox.dataset.slno);
       if (!checkbox.checked) return;
@@ -1307,6 +1427,26 @@ window.createNewTask = async function() {
         bidQty: qty,
         units: catalogItem.units,
         unitRate: catalogItem.unitRate,
+        deliveredQty: 0,
+        installedQty: 0,
+        materialCondition: '',
+        installationNotes: '',
+      });
+    });
+    // Extra items the manager added manually (item 4 — not in the fixed catalog)
+    document.querySelectorAll('#ctBOQExtraRows tr').forEach(row => {
+      const desc = row.querySelector('.ct-extra-desc')?.value?.trim();
+      const qty = Number(row.querySelector('.ct-extra-qty')?.value) || 0;
+      if (!desc || qty <= 0) return;
+      maxSlNo++;
+      boqItems.push({
+        slNo: maxSlNo,
+        description: desc,
+        itemCode: row.querySelector('.ct-extra-code')?.value?.trim() || `EXTRA-${maxSlNo}`,
+        itemType: row.querySelector('.ct-extra-type')?.value || 'Hardware',
+        bidQty: qty,
+        units: row.querySelector('.ct-extra-unit')?.value || 'Number',
+        unitRate: 0,
         deliveredQty: 0,
         installedQty: 0,
         materialCondition: '',
@@ -1338,6 +1478,30 @@ window.createNewTask = async function() {
     }
   }
 
+  // Collect custom fields (Sprint 6D — manager-defined, engineer just fills them in)
+  const customFields = [];
+  let customFieldError = '';
+  document.querySelectorAll('[id^="ct-custom-field-"]').forEach(row => {
+    if (customFieldError) return;
+    const label = row.querySelector('.cf-label')?.value?.trim();
+    const type = row.querySelector('.cf-type')?.value;
+    if (!label) return;
+    const field = { id: `custom_${Date.now()}_${customFields.length}`, label, type, required: false };
+    if (type === 'radio') {
+      const opts = (row.querySelector('.cf-options')?.value || '').split(',').map(o => o.trim()).filter(Boolean);
+      if (opts.length < 2) {
+        customFieldError = `Custom field "${label}" needs at least 2 comma-separated options.`;
+        return;
+      }
+      field.options = opts;
+    }
+    customFields.push(field);
+  });
+  if (customFieldError) {
+    alert(customFieldError);
+    return;
+  }
+
   const [siteId, siteName, lat, lng] = siteVal.split('|');
   const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
   const managerName = auth.currentUser?.displayName || auth.currentUser?.email || 'Manager';
@@ -1361,10 +1525,12 @@ window.createNewTask = async function() {
     estimatedDuration: duration,
     customerName: customer || 'N/A',
     contactNumber: contact || 'N/A',
+    customerEmail,
     templateId: selectedTemplateId,
     templateName: allTemplates.find(t => t.id === selectedTemplateId)?.name || 'General',
     hasBOQ: hasBOQ,
     boqItemCount: boqItems.length,
+    customFields,
     history: [
       { state: 'ASSIGNED', timestamp: now, by: managerName },
     ],
@@ -1468,10 +1634,45 @@ window.renderBOQCatalogGrid = function() {
             </tr>
           `).join('')}
         </tbody>
+        <tbody id="ctBOQExtraRows"></tbody>
       </table>
-      <div class="boq-grid-footer">Only Quantity is editable — item name, code, category, and unit are fixed for this project type. Uncheck a row to exclude it. Leave quantity blank/0 to skip.</div>
+      <div style="padding:8px 10px;border-top:1px solid var(--border)">
+        <button class="filter-btn" onclick="addExtraCatalogRow()" style="padding:6px 14px">+ Add Item Not In This List</button>
+      </div>
+      <div class="boq-grid-footer">Only Quantity is editable on catalog rows — item name, code, category, and unit are fixed for this project type. Uncheck a row to exclude it. Use "+ Add Item Not In This List" for anything project-specific.</div>
     </div>
   `;
+};
+
+// ─── Extra BOQ items (Sprint 6, item 4) — for items not in the fixed catalog ───
+let extraBOQRowCounter = 0;
+window.addExtraCatalogRow = function() {
+  extraBOQRowCounter++;
+  const tbody = document.getElementById('ctBOQExtraRows');
+  const row = document.createElement('tr');
+  row.id = `ct-extra-row-${extraBOQRowCounter}`;
+  row.innerHTML = `
+    <td><button onclick="document.getElementById('ct-extra-row-${extraBOQRowCounter}').remove()" style="background:var(--red-bg);color:var(--red);border:none;border-radius:4px;padding:2px 6px;cursor:pointer;font-size:11px">✕</button></td>
+    <td>—</td>
+    <td><input type="text" class="boq-grid-qty-input ct-extra-desc" placeholder="Item name" style="width:100%"></td>
+    <td><input type="text" class="boq-grid-qty-input ct-extra-code" placeholder="Code" style="width:100%"></td>
+    <td>
+      <select class="boq-grid-qty-input ct-extra-type" style="width:100%">
+        <option value="Hardware">Hardware</option>
+        <option value="Software">Software</option>
+      </select>
+    </td>
+    <td>
+      <select class="boq-grid-qty-input ct-extra-unit" style="width:100%">
+        <option value="Number">Number</option>
+        <option value="Meter">Meter</option>
+        <option value="Set">Set</option>
+        <option value="Lot">Lot</option>
+      </select>
+    </td>
+    <td><input type="number" min="0" class="boq-grid-qty-input ct-extra-qty" placeholder="0"></td>
+  `;
+  tbody.appendChild(row);
 };
 
 window.onCatalogRowToggle = function(slNo) {
@@ -1506,6 +1707,43 @@ window.addTaskBOQItemRow = function() {
     </div>
   `;
   div.appendChild(row);
+};
+
+// ─── CUSTOM FIELDS AT TASK CREATION (Sprint 6D) ───
+let taskCustomFieldCounter = 0;
+window.addTaskCustomFieldRow = function() {
+  taskCustomFieldCounter++;
+  const div = document.getElementById('ctCustomFieldsList');
+  const row = document.createElement('div');
+  row.id = `ct-custom-field-${taskCustomFieldCounter}`;
+  row.style.cssText = 'border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;background:#fafbff';
+  row.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <strong style="font-size:12px;color:var(--text-secondary)">Field ${taskCustomFieldCounter}</strong>
+      <button onclick="document.getElementById('ct-custom-field-${taskCustomFieldCounter}').remove()" style="background:var(--red-bg);color:var(--red);border:none;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px">✕ Remove</button>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><input class="form-input cf-label" placeholder="Field label (e.g. Cable Color)" style="margin-bottom:0"></div>
+      <div class="form-group">
+        <select class="form-select cf-type" style="margin-bottom:0" onchange="onCustomFieldTypeChange(${taskCustomFieldCounter})">
+          <option value="text">Short Text</option>
+          <option value="multiline">Long Text</option>
+          <option value="radio">Choice</option>
+          <option value="photo">Photo</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group cf-options-wrap" id="cf-options-wrap-${taskCustomFieldCounter}" style="display:none;margin-top:6px">
+      <input class="form-input cf-options" placeholder="Options, comma-separated (e.g. Good, Fair, Poor)" style="margin-bottom:0">
+    </div>
+  `;
+  div.appendChild(row);
+};
+
+window.onCustomFieldTypeChange = function(id) {
+  const row = document.getElementById('ct-custom-field-' + id);
+  const type = row.querySelector('.cf-type').value;
+  document.getElementById('cf-options-wrap-' + id).style.display = type === 'radio' ? 'block' : 'none';
 };
 
 // ─── BOQ FUNCTIONS ───
@@ -2133,8 +2371,8 @@ function statusBadge(status) {
 }
 
 function stateBadge(state) {
-  const map = { ASSIGNED: 'badge-blue', ACCEPTED: 'badge-purple', IN_PROGRESS: 'badge-amber', BLOCKED: 'badge-red', COMPLETED: 'badge-green', VERIFIED: 'badge-green' };
-  const icons = { ASSIGNED: '📋', ACCEPTED: '✋', IN_PROGRESS: '🔧', BLOCKED: '🚫', COMPLETED: '✓', VERIFIED: '✅' };
+  const map = { ASSIGNED: 'badge-blue', ACCEPTED: 'badge-purple', IN_PROGRESS: 'badge-amber', BLOCKED: 'badge-red', COMPLETED: 'badge-green', VERIFIED: 'badge-green', CLOSED: 'badge-gray' };
+  const icons = { ASSIGNED: '📋', ACCEPTED: '✋', IN_PROGRESS: '🔧', BLOCKED: '🚫', COMPLETED: '✓', VERIFIED: '✅', CLOSED: '🔒' };
   return `<span class="badge ${map[state] || 'badge-gray'}">${icons[state] || ''} ${state || 'N/A'}</span>`;
 }
 
@@ -2237,15 +2475,18 @@ function renderTasks() {
   let filtered = allTasks;
   if (currentTaskFilter === 'active') filtered = allTasks.filter(t => ['ASSIGNED','ACCEPTED','IN_PROGRESS','BLOCKED'].includes(t.state));
   if (currentTaskFilter === 'completed') filtered = allTasks.filter(t => ['COMPLETED','VERIFIED'].includes(t.state));
+  if (currentTaskFilter === 'closed') filtered = allTasks.filter(t => t.state === 'CLOSED');
 
   const active = allTasks.filter(t => ['ASSIGNED','ACCEPTED','IN_PROGRESS','BLOCKED'].includes(t.state)).length;
   const completed = allTasks.filter(t => ['COMPLETED','VERIFIED'].includes(t.state)).length;
-  const high = allTasks.filter(t => t.priority === 'HIGH' && !['VERIFIED'].includes(t.state)).length;
+  const closed = allTasks.filter(t => t.state === 'CLOSED').length;
+  const high = allTasks.filter(t => t.priority === 'HIGH' && !['VERIFIED','CLOSED'].includes(t.state)).length;
 
   document.getElementById('taskCount').textContent = allTasks.length;
   document.getElementById('taskStats').innerHTML = `
     <div class="stat-card purple"><div class="stat-label">Active</div><div class="stat-value" style="color:var(--purple)">${active}</div></div>
     <div class="stat-card green"><div class="stat-label">Completed</div><div class="stat-value" style="color:var(--green)">${completed}</div></div>
+    <div class="stat-card"><div class="stat-label">Closed</div><div class="stat-value" style="color:#6b7280">${closed}</div></div>
     <div class="stat-card red"><div class="stat-label">High Priority</div><div class="stat-value" style="color:var(--red)">${high}</div></div>
     <div class="stat-card"><div class="stat-label">Total</div><div class="stat-value">${allTasks.length}</div></div>
   `;
@@ -2304,8 +2545,13 @@ function renderIssues() {
 }
 
 function renderEngineers() {
-  // Aggregate engineer activity from surveys and issues
+  // Start from the registered engineers list so newly-added engineers show
+  // up immediately (with 0 activity), then layer in real survey/issue counts.
   const engineers = {};
+  allEngineers.forEach(e => {
+    const key = e.email || e.name || 'unknown';
+    engineers[key] = { name: e.name || 'Unknown', email: e.email || '', surveys: 0, issues: 0, lastActive: null };
+  });
 
   allSurveys.forEach(s => {
     const key = s.userEmail || s.userName || 'unknown';
@@ -2326,7 +2572,7 @@ function renderEngineers() {
 
   const rows = Object.values(engineers);
   document.getElementById('engineersTable').innerHTML = rows.length === 0
-    ? '<tr><td colspan="5" class="empty-state"><div class="empty-icon">👷</div>No engineer activity yet</td></tr>'
+    ? '<tr><td colspan="5" class="empty-state"><div class="empty-icon">👷</div>No engineers yet — click "+ Add Engineer" above</td></tr>'
     : rows.map(e => `<tr>
         <td><strong>${e.name}</strong></td>
         <td>${e.email}</td>
